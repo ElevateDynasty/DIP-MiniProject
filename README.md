@@ -9,25 +9,38 @@ A modern Digital Image Processing web application built with **React.js** + **Fa
 
 ## 🚀 Features
 
-### Image Processing Operations (50+ Operations)
+### Image Processing Operations (60+ Operations)
 
 | Category | Operations |
 |----------|------------|
-| **Basic** | Grayscale, Negative, Flip, Rotate, Brightness, Contrast, Histogram Equalization |
-| **Filters** | Gaussian, Median, Bilateral, Sharpen, Unsharp Mask, Emboss, Denoise |
-| **Edge Detection** | Sobel, Canny, Laplacian, Prewitt, Scharr, Roberts |
-| **Segmentation** | Binary, Otsu, Adaptive Threshold, K-Means, Watershed |
-| **Morphology** | Erosion, Dilation, Opening, Closing, Gradient, Skeleton |
-| **Frequency Domain** | FFT Spectrum, Low-Pass, High-Pass, Band-Pass Filters |
-| **Feature Detection** | Harris Corners, Contours, Hough Lines/Circles |
-| **AI Effects** | Face Detection, Face Mesh, Hand Detection, Pencil Sketch, Cartoon, HDR |
+| **Preset Filters** | Vintage, Noir, Warm, Cool, Dramatic, Fade (Instagram-style) |
+| **Basic** | Grayscale, Negative, Flip, Rotate, Brightness, Contrast, Gamma, Histogram Equalization |
+| **Filters** | Gaussian, Median, Bilateral, Sharpen, Unsharp Mask, Emboss, Denoise, Motion Blur |
+| **Edge Detection** | Sobel, Canny, Laplacian, Prewitt, Scharr, Roberts, Auto Canny |
+| **Segmentation** | Binary, Otsu, Adaptive Threshold, K-Means, Watershed, Contours |
+| **Morphology** | Erosion, Dilation, Opening, Closing, Gradient, Skeleton, Boundary |
+| **Frequency Domain** | FFT Spectrum, Low-Pass, High-Pass, Band-Pass, Butterworth, Gaussian LP |
+| **Feature Detection** | Harris Corners, Shi-Tomasi, ORB, Hough Lines/Circles |
+| **AI / Deep Learning** | Face Detection, Eye Detection, Background Removal, Object Detection, OCR, Colorize, HDR, Pencil Sketch, Cartoon, Stylization |
+
+### Advanced Features
+- 🎬 **Real-time Video Processing** - WebSocket-based live video effects
+- 📦 **Batch Processing** - Process multiple images, download as ZIP
+- ✂️ **Background Removal** - AI-powered background removal
+- 🔍 **Object Detection** - Automatic object detection with bounding boxes
+- 📝 **OCR Text Extraction** - Detect text regions in images
+- 🎨 **Image Inpainting** - Remove objects and fill gaps
+- 🖌️ **Custom Filter Builder** - Create custom convolution kernels
 
 ### Modern UI
-- 🎨 Beautiful dark theme with gradient accents
+- 🎨 Beautiful dark/light theme with toggle
 - 📱 Fully responsive design
 - 🖼️ Drag & drop image upload
-- 🔍 Zoom controls
-- ↔️ Before/After comparison mode
+- 🔍 Zoom controls (25% - 300%)
+- ↔️ Interactive before/after comparison slider
+- ⏪ Full history with undo/redo support
+- ✏️ Image annotation tools (pen, shapes, text, eraser)
+- 🎚️ Parameter sliders for adjustable operations
 - 💾 Download processed images
 
 ## 🛠️ Tech Stack
@@ -83,9 +96,13 @@ FastAPI provides interactive API docs at `http://localhost:8000/docs`
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/basic/grayscale` | Convert to grayscale |
-| POST | `/api/filters/gaussian` | Apply Gaussian blur |
+| POST | `/api/filters/gaussian?kernel_size=5` | Apply Gaussian blur |
 | POST | `/api/edge/canny` | Canny edge detection |
-| POST | `/api/ai/face-detection` | Detect faces in image |
+| POST | `/api/presets/vintage` | Apply vintage filter |
+| POST | `/api/ai/remove-background` | Remove image background |
+| POST | `/api/ai/detect-objects` | Detect objects in image |
+| POST | `/api/batch/process` | Batch process images (ZIP) |
+| WS | `/ws/video` | Real-time video processing |
 | GET | `/operations` | List all available operations |
 
 ## 📁 Project Structure
@@ -93,14 +110,21 @@ FastAPI provides interactive API docs at `http://localhost:8000/docs`
 ```
 DIPProject/
 ├── backend/
-│   ├── main.py              # FastAPI application (50+ endpoints)
+│   ├── main.py              # FastAPI application (60+ endpoints)
 │   └── requirements.txt     # Python dependencies
 ├── frontend/
 │   ├── src/
 │   │   ├── api/imageApi.js  # API client
-│   │   ├── components/      # React components
-│   │   ├── App.jsx          # Main app
-│   │   └── index.css        # Tailwind styles
+│   │   ├── components/
+│   │   │   ├── Header.jsx          # Navigation + theme toggle
+│   │   │   ├── ImageUploader.jsx   # Drag & drop upload
+│   │   │   ├── ImageViewer.jsx     # Image display + zoom
+│   │   │   ├── OperationsPanel.jsx # 60+ operations with sliders
+│   │   │   ├── HistoryPanel.jsx    # Undo/redo history
+│   │   │   ├── CompareSlider.jsx   # Before/after comparison
+│   │   │   └── AnnotationTools.jsx # Drawing tools
+│   │   ├── App.jsx          # Main app with state management
+│   │   └── index.css        # Tailwind + custom styles
 │   ├── package.json
 │   └── vite.config.js
 ├── src/                     # Python image processing modules
