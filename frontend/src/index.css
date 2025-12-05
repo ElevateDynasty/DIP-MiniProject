@@ -12,6 +12,51 @@ body {
   font-family: 'Inter', sans-serif;
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
   min-height: 100vh;
+  transition: background 0.3s ease;
+}
+
+/* Light mode */
+.light-mode body,
+html.light-mode body {
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+.light-mode .card {
+  @apply bg-white/80 border-gray-200;
+}
+
+.light-mode .btn-ghost {
+  @apply hover:bg-gray-200 text-gray-700;
+}
+
+.light-mode .text-white {
+  @apply text-gray-900;
+}
+
+.light-mode .text-gray-300,
+.light-mode .text-gray-400 {
+  @apply text-gray-600;
+}
+
+.light-mode .text-gray-500 {
+  @apply text-gray-500;
+}
+
+.light-mode .bg-gray-800,
+.light-mode .bg-gray-700 {
+  @apply bg-gray-100;
+}
+
+.light-mode .border-gray-700 {
+  @apply border-gray-300;
+}
+
+.light-mode ::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+.light-mode ::-webkit-scrollbar-thumb {
+  background: #94a3b8;
 }
 
 /* Custom scrollbar */

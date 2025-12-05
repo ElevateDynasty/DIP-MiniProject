@@ -3,17 +3,21 @@ FastAPI Backend for DIP Project
 REST API for image processing operations
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Form, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import cv2
 import numpy as np
 from PIL import Image
 import io
 import base64
-from typing import Optional
+from typing import Optional, List
 import sys
 import os
+import zipfile
+import json
+import asyncio
+import tempfile
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -800,3 +804,562 @@ async def api_detail_enhance(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# ==================== NEW FEATURES ====================
+
+# ==================== BATCH PROCESSING ====================
+
+@app.post("/api/batch/process")
+async def batch_process(
+    files: List[UploadFile] = File(...),
+    operation: str = Query(...),
+    params: str = Query("{}")  # JSON string of parameters
+):
+    """Process multiple images with the same operation and return as ZIP."""
+    try:
+        operation_params = json.loads(params)
+    except json.JSONDecodeError:
+        operation_params = {}
+    
+    # Create ZIP file in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for i, file in enumerate(files):
+            img = decode_image(await file.read())
+            result = apply_operation(img, operation, operation_params)
+            img_bytes = encode_image(result)
+            filename = f"processed_{i+1}_{file.filename or 'image.png'}"
+            zip_file.writestr(filename, img_bytes)
+    
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=processed_images.zip"}
+    )
+
+
+def apply_operation(img: np.ndarray, operation: str, params: dict) -> np.ndarray:
+    """Apply a specific operation to an image."""
+    operations_map = {
+        'grayscale': lambda: cv2.cvtColor(img, cv2.COLOR_BGR2GRAY),
+        'negative': lambda: negative_image(img),
+        'flip_h': lambda: flip_image(img, 'horizontal'),
+        'flip_v': lambda: flip_image(img, 'vertical'),
+        'rotate': lambda: rotate_image(img, params.get('angle', 90)),
+        'brightness': lambda: adjust_brightness(img, params.get('value', 50)),
+        'contrast': lambda: adjust_contrast(img, params.get('factor', 1.5)),
+        'gaussian': lambda: gaussian_filter(img, params.get('kernel_size', 5)),
+        'median': lambda: median_filter(img, params.get('kernel_size', 5)),
+        'sharpen': lambda: sharpen_filter(img),
+        'sobel': lambda: sobel_edge_detection(img),
+        'canny': lambda: canny_edge_detection(img),
+        'laplacian': lambda: laplacian_edge_detection(img),
+        'erosion': lambda: erosion(img),
+        'dilation': lambda: dilation(img),
+    }
+    
+    if operation in operations_map:
+        return operations_map[operation]()
+    return img
+
+
+# ==================== BACKGROUND REMOVAL ====================
+
+@app.post("/api/ai/remove-background")
+async def remove_background(file: UploadFile = File(...)):
+    """Remove background from image using GrabCut algorithm."""
+    img = decode_image(await file.read())
+    
+    # Use GrabCut algorithm
+    mask = np.zeros(img.shape[:2], np.uint8)
+    bgd_model = np.zeros((1, 65), np.float64)
+    fgd_model = np.zeros((1, 65), np.float64)
+    
+    # Define rectangle (with some margin)
+    h, w = img.shape[:2]
+    margin = 10
+    rect = (margin, margin, w - 2*margin, h - 2*margin)
+    
+    cv2.grabCut(img, mask, rect, bgd_model, fgd_model, 5, cv2.GC_INIT_WITH_RECT)
+    
+    # Create mask where foreground is
+    mask2 = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8')
+    
+    # Apply mask to image
+    result = img * mask2[:, :, np.newaxis]
+    
+    # Add alpha channel
+    b, g, r = cv2.split(result)
+    alpha = (mask2 * 255).astype(np.uint8)
+    result_rgba = cv2.merge([b, g, r, alpha])
+    
+    # Encode as PNG to preserve transparency
+    success, encoded = cv2.imencode(".png", result_rgba)
+    return StreamingResponse(
+        io.BytesIO(encoded.tobytes()),
+        media_type="image/png"
+    )
+
+
+# ==================== OBJECT DETECTION ====================
+
+@app.post("/api/ai/detect-objects")
+async def detect_objects(file: UploadFile = File(...)):
+    """Detect objects using edge-based detection with contours."""
+    img = decode_image(await file.read())
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Apply edge detection
+    edges = cv2.Canny(gray, 50, 150)
+    
+    # Find contours
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Draw bounding boxes for significant contours
+    result = img.copy()
+    objects_found = []
+    
+    for i, contour in enumerate(contours):
+        area = cv2.contourArea(contour)
+        if area > 500:  # Filter small noise
+            x, y, w, h = cv2.boundingRect(contour)
+            cv2.rectangle(result, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.putText(result, f"Object {i+1}", (x, y-10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            objects_found.append({"id": i+1, "x": x, "y": y, "width": w, "height": h, "area": area})
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== OCR TEXT EXTRACTION ====================
+
+@app.post("/api/ai/extract-text")
+async def extract_text(file: UploadFile = File(...)):
+    """Extract text regions from image (prepare for OCR)."""
+    img = decode_image(await file.read())
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Apply MSER for text region detection
+    mser = cv2.MSER_create()
+    regions, _ = mser.detectRegions(gray)
+    
+    result = img.copy()
+    hulls = [cv2.convexHull(p.reshape(-1, 1, 2)) for p in regions]
+    
+    for hull in hulls:
+        x, y, w, h = cv2.boundingRect(hull)
+        # Filter by aspect ratio (text regions are usually horizontal)
+        if w > h and w > 10 and h > 5:
+            cv2.rectangle(result, (x, y), (x+w, y+h), (0, 255, 0), 1)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== IMAGE INPAINTING ====================
+
+@app.post("/api/ai/inpaint")
+async def inpaint_image(
+    file: UploadFile = File(...),
+    mask_data: str = Form(None),  # Base64 encoded mask
+    x: int = Query(None),
+    y: int = Query(None),
+    width: int = Query(50),
+    height: int = Query(50)
+):
+    """Inpaint (remove and fill) a region of the image."""
+    img = decode_image(await file.read())
+    
+    # Create mask - either from provided mask or from coordinates
+    if mask_data:
+        # Decode base64 mask
+        mask_bytes = base64.b64decode(mask_data)
+        mask_arr = np.frombuffer(mask_bytes, np.uint8)
+        mask = cv2.imdecode(mask_arr, cv2.IMREAD_GRAYSCALE)
+    else:
+        # Create mask from coordinates
+        mask = np.zeros(img.shape[:2], dtype=np.uint8)
+        if x is not None and y is not None:
+            mask[y:y+height, x:x+width] = 255
+        else:
+            # Default: center region
+            h, w = img.shape[:2]
+            cx, cy = w // 2, h // 2
+            mask[cy-25:cy+25, cx-25:cx+25] = 255
+    
+    # Apply inpainting
+    result = cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== PRESET FILTERS (Instagram-style) ====================
+
+@app.post("/api/presets/vintage")
+async def preset_vintage(file: UploadFile = File(...)):
+    """Apply vintage filter."""
+    img = decode_image(await file.read())
+    
+    # Sepia tone
+    sepia_kernel = np.array([[0.272, 0.534, 0.131],
+                             [0.349, 0.686, 0.168],
+                             [0.393, 0.769, 0.189]])
+    result = cv2.transform(img, sepia_kernel)
+    result = np.clip(result, 0, 255).astype(np.uint8)
+    
+    # Add vignette
+    rows, cols = result.shape[:2]
+    X = cv2.getGaussianKernel(cols, cols/2)
+    Y = cv2.getGaussianKernel(rows, rows/2)
+    kernel = Y * X.T
+    mask = kernel / kernel.max()
+    for i in range(3):
+        result[:, :, i] = result[:, :, i] * mask
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+@app.post("/api/presets/noir")
+async def preset_noir(file: UploadFile = File(...)):
+    """Apply noir (high contrast B&W) filter."""
+    img = decode_image(await file.read())
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Increase contrast
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    result = clahe.apply(gray)
+    
+    # Add slight vignette
+    rows, cols = result.shape
+    X = cv2.getGaussianKernel(cols, cols/1.5)
+    Y = cv2.getGaussianKernel(rows, rows/1.5)
+    kernel = Y * X.T
+    mask = kernel / kernel.max()
+    result = (result * mask).astype(np.uint8)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+@app.post("/api/presets/warm")
+async def preset_warm(file: UploadFile = File(...)):
+    """Apply warm color filter."""
+    img = decode_image(await file.read())
+    
+    # Increase red and yellow
+    result = img.copy().astype(np.float32)
+    result[:, :, 2] = np.clip(result[:, :, 2] * 1.2, 0, 255)  # Red
+    result[:, :, 1] = np.clip(result[:, :, 1] * 1.1, 0, 255)  # Green (for yellow)
+    result[:, :, 0] = np.clip(result[:, :, 0] * 0.9, 0, 255)  # Reduce blue
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result.astype(np.uint8))),
+        media_type="image/png"
+    )
+
+
+@app.post("/api/presets/cool")
+async def preset_cool(file: UploadFile = File(...)):
+    """Apply cool color filter."""
+    img = decode_image(await file.read())
+    
+    # Increase blue
+    result = img.copy().astype(np.float32)
+    result[:, :, 0] = np.clip(result[:, :, 0] * 1.2, 0, 255)  # Blue
+    result[:, :, 1] = np.clip(result[:, :, 1] * 1.05, 0, 255)  # Slight green
+    result[:, :, 2] = np.clip(result[:, :, 2] * 0.9, 0, 255)  # Reduce red
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result.astype(np.uint8))),
+        media_type="image/png"
+    )
+
+
+@app.post("/api/presets/dramatic")
+async def preset_dramatic(file: UploadFile = File(...)):
+    """Apply dramatic filter with high contrast and saturation."""
+    img = decode_image(await file.read())
+    
+    # Convert to HSV
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
+    
+    # Increase saturation
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.5, 0, 255)
+    
+    # Convert back
+    result = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+    
+    # Increase contrast
+    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    result = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+@app.post("/api/presets/fade")
+async def preset_fade(file: UploadFile = File(...)):
+    """Apply faded/washed out filter."""
+    img = decode_image(await file.read())
+    
+    # Reduce contrast and increase brightness
+    result = cv2.convertScaleAbs(img, alpha=0.7, beta=60)
+    
+    # Desaturate slightly
+    hsv = cv2.cvtColor(result, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] = hsv[:, :, 1] * 0.7
+    result = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== IMAGE COLORIZATION ====================
+
+@app.post("/api/ai/colorize")
+async def colorize_image(file: UploadFile = File(...)):
+    """Colorize grayscale image using histogram matching."""
+    img = decode_image(await file.read())
+    
+    # Convert to grayscale if not already
+    if len(img.shape) == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img
+    
+    # Apply color map for colorization effect
+    result = cv2.applyColorMap(gray, cv2.COLORMAP_JET)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== CUSTOM FILTER BUILDER ====================
+
+@app.post("/api/custom/apply-kernel")
+async def apply_custom_kernel(
+    file: UploadFile = File(...),
+    kernel: str = Query(...)  # JSON array for kernel matrix
+):
+    """Apply a custom convolution kernel."""
+    img = decode_image(await file.read())
+    
+    try:
+        kernel_matrix = np.array(json.loads(kernel), dtype=np.float32)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid kernel format: {e}")
+    
+    # Ensure kernel is properly shaped
+    if len(kernel_matrix.shape) != 2:
+        raise HTTPException(status_code=400, detail="Kernel must be a 2D matrix")
+    
+    # Apply kernel
+    result = cv2.filter2D(img, -1, kernel_matrix)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== IMAGE ANNOTATIONS ====================
+
+@app.post("/api/annotate/draw")
+async def draw_annotation(
+    file: UploadFile = File(...),
+    shapes: str = Query(...)  # JSON array of shapes
+):
+    """Draw annotations on image."""
+    img = decode_image(await file.read())
+    
+    try:
+        shapes_list = json.loads(shapes)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid shapes JSON")
+    
+    result = img.copy()
+    
+    for shape in shapes_list:
+        shape_type = shape.get('type', 'rectangle')
+        color = tuple(shape.get('color', [0, 255, 0]))
+        thickness = shape.get('thickness', 2)
+        
+        if shape_type == 'rectangle':
+            x, y = shape.get('x', 0), shape.get('y', 0)
+            w, h = shape.get('width', 50), shape.get('height', 50)
+            cv2.rectangle(result, (x, y), (x+w, y+h), color, thickness)
+        
+        elif shape_type == 'circle':
+            cx, cy = shape.get('cx', 50), shape.get('cy', 50)
+            radius = shape.get('radius', 25)
+            cv2.circle(result, (cx, cy), radius, color, thickness)
+        
+        elif shape_type == 'line':
+            x1, y1 = shape.get('x1', 0), shape.get('y1', 0)
+            x2, y2 = shape.get('x2', 100), shape.get('y2', 100)
+            cv2.line(result, (x1, y1), (x2, y2), color, thickness)
+        
+        elif shape_type == 'text':
+            text = shape.get('text', 'Text')
+            x, y = shape.get('x', 50), shape.get('y', 50)
+            font_scale = shape.get('font_scale', 1)
+            cv2.putText(result, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 
+                       font_scale, color, thickness)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+@app.post("/api/annotate/crop")
+async def crop_image(
+    file: UploadFile = File(...),
+    x: int = Query(0),
+    y: int = Query(0),
+    width: int = Query(100),
+    height: int = Query(100)
+):
+    """Crop image to specified region."""
+    img = decode_image(await file.read())
+    
+    h, w = img.shape[:2]
+    x = max(0, min(x, w))
+    y = max(0, min(y, h))
+    width = min(width, w - x)
+    height = min(height, h - y)
+    
+    result = img[y:y+height, x:x+width]
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== VIDEO PROCESSING ====================
+
+@app.websocket("/ws/video")
+async def video_processing_websocket(websocket: WebSocket):
+    """WebSocket endpoint for real-time video processing."""
+    await websocket.accept()
+    
+    try:
+        while True:
+            # Receive frame data and operation
+            data = await websocket.receive_json()
+            
+            frame_data = data.get('frame')
+            operation = data.get('operation', 'none')
+            params = data.get('params', {})
+            
+            if frame_data:
+                # Decode base64 frame
+                frame_bytes = base64.b64decode(frame_data)
+                nparr = np.frombuffer(frame_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if frame is not None:
+                    # Apply operation
+                    processed = apply_operation(frame, operation, params)
+                    
+                    # Encode and send back
+                    _, encoded = cv2.imencode('.jpg', processed)
+                    result_base64 = base64.b64encode(encoded.tobytes()).decode('utf-8')
+                    
+                    await websocket.send_json({'frame': result_base64})
+    
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        await websocket.close()
+
+
+# ==================== IMAGE COMPARISON ====================
+
+@app.post("/api/compare/diff")
+async def image_diff(
+    file1: UploadFile = File(...),
+    file2: UploadFile = File(...)
+):
+    """Calculate difference between two images."""
+    img1 = decode_image(await file1.read())
+    img2 = decode_image(await file2.read())
+    
+    # Resize to same dimensions if needed
+    if img1.shape != img2.shape:
+        img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
+    
+    # Calculate absolute difference
+    diff = cv2.absdiff(img1, img2)
+    
+    # Highlight differences
+    gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray_diff, 30, 255, cv2.THRESH_BINARY)
+    
+    # Create colored diff overlay
+    result = img1.copy()
+    result[thresh > 0] = [0, 0, 255]  # Red for differences
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
+
+
+# ==================== HDR EFFECT ====================
+
+@app.post("/api/ai/hdr-effect")
+async def hdr_effect(file: UploadFile = File(...)):
+    """Apply HDR-like effect."""
+    img = decode_image(await file.read())
+    
+    # Apply detail enhancement
+    result = cv2.detailEnhance(img, sigma_s=12, sigma_r=0.15)
+    
+    # Increase local contrast
+    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    result = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+    
+    # Slight saturation boost
+    hsv = cv2.cvtColor(result, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.2, 0, 255)
+    result = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+    
+    return StreamingResponse(
+        io.BytesIO(encode_image(result)),
+        media_type="image/png"
+    )
