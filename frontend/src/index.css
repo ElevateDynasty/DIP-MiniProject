@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Dropzone styles */
+.dropzone {
+  @apply border-2 border-dashed border-gray-600 rounded-xl p-8 text-center cursor-pointer transition-all duration-300;
+}
+
+.dropzone:hover {
+  @apply border-primary-500 bg-primary-500/5;
+}
+
+.dropzone.active {
+  @apply border-primary-400 bg-primary-500/10;
+}
+
+/* Slider styles */
+input[type="range"] {
+  @apply w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  @apply appearance-none w-4 h-4 bg-primary-500 rounded-full cursor-pointer hover:bg-primary-400 transition-colors;
+}
+
+/* Button styles */
+.btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2;
+}
+
+.btn-primary {
+  @apply bg-primary-600 hover:bg-primary-500 text-white;
+}
+
+.btn-secondary {
+  @apply bg-gray-700 hover:bg-gray-600 text-white;
+}
+
+.btn-ghost {
+  @apply bg-transparent hover:bg-gray-700 text-gray-300;
+}
+
+/* Card styles */
+.card {
+  @apply bg-gray-800/50 backdrop-blur-sm rounded-xl border border-gray-700/50;
+}
+
+/* Select styles */
+select {
+  @apply bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-primary-500;
+}
